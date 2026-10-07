@@ -20,3 +20,42 @@ jobs:
       - run: uv run mypy src tests
       - run: uv run bandit -q -r src
       - run: uv run pytest
+
+  terraform-validate:
+    # Needs no credentials, so it runs before the bootstrap has happened.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive infra
+      - name: terraform validate
+        working-directory: infra/envs/demo
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+  terraform-plan:
+    # Plan on PRs so the infra diff is reviewed before merge. Skipped until
+    # infra/bootstrap/bootstrap.sh has run and GCP_WIF_PROVIDER is set.
+    if: github.event_name == 'pull_request' && vars.GCP_WIF_PROVIDER != ''
+    runs-on: ubuntu-latest
+    needs: terraform-validate
+    concurrency:
+      group: terraform-state-demo
+      cancel-in-progress: false
+    permissions:
+      id-token: write # the OIDC token Workload Identity Federation exchanges
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_PLAN_SA }}
+      - uses: hashicorp/setup-terraform@v3
+      - name: terraform init
+        working-directory: infra/envs/demo
+        run: terraform init
+      - name: terraform plan
+        working-directory: infra/envs/demo
+        run: terraform plan -lock-timeout=5m -input=false
