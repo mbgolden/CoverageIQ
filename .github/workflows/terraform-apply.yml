@@ -1,0 +1,37 @@
+name: Terraform Apply (demo)
+
+# Runs on merge to main, inside the gcp-apply GitHub Environment, whose
+# required reviewer is the human gate (ADR-0003). The deployer service
+# account is only reachable from this environment.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+  workflow_dispatch:
+
+concurrency:
+  group: terraform-state-demo
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: gcp-apply
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_APPLY_SA }}
+      - uses: hashicorp/setup-terraform@v3
+      - name: terraform init
+        working-directory: infra/envs/demo
+        run: terraform init -input=false
+      - name: terraform apply
+        working-directory: infra/envs/demo
+        run: terraform apply -auto-approve -input=false -lock-timeout=5m
